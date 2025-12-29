@@ -1,0 +1,71 @@
+# plat-garage: Tiered Storage System
+# Provides local cache → R2 (hot) → B2 (cold) storage
+#
+# Core infrastructure package - required by other plat-* systems
+
+name: plat-garage
+version: 0.1.0
+description: GARAGE tiered storage with local cache, R2 hot tier, and B2 cold tier
+author: joeblew999
+license: MIT
+
+# Binary installation
+binary:
+  name: tiered
+  source:
+    go: github.com/joeblew999/plat-garage/cmd/tiered@latest
+
+# Taskfile for development commands
+taskfile:
+  path: Taskfile.yml
+
+# Process configuration for process-compose
+processes:
+  tiered:
+    command: tiered serve
+    description: GARAGE tiered storage HTTP proxy
+    port: 8091
+
+# Environment variables
+env:
+  required:
+    - name: R2_ACCOUNT_ID
+      description: Cloudflare R2 account ID
+    - name: R2_BUCKET
+      description: R2 bucket name
+    - name: R2_ACCESS_KEY
+      description: R2 API access key
+    - name: R2_SECRET_KEY
+      description: R2 API secret key
+  optional:
+    - name: GARAGE_LOCAL_PATH
+      description: Local cache directory
+      default: ./cache
+    - name: TIERED_PORT
+      description: HTTP proxy port
+      default: "8091"
+    - name: B2_ACCOUNT
+      description: Backblaze B2 account ID (for cold archive)
+    - name: B2_KEY
+      description: B2 application key
+    - name: B2_BUCKET
+      description: B2 bucket name
+    - name: PBHA_URL
+      description: PocketBase-HA URL for multi-device sync
+    - name: PBHA_ADMIN_EMAIL
+      description: PocketBase admin email
+    - name: PBHA_ADMIN_PASS
+      description: PocketBase admin password
+    - name: DEVICE_NAME
+      description: This device name (defaults to hostname)
+    - name: NATS_URL
+      description: NATS server URL for real-time events
+      default: nats://localhost:4222
+
+# Dependencies
+dependencies:
+  build:
+    - go>=1.23
+
+# Core package marker - indicates this is required infrastructure
+core: true
