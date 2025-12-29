@@ -2,26 +2,30 @@
 #
 # MVP: PocketBase-HA with R2 backend, local cache, B2 archiving
 #
-# Run from this directory:
-#   cd garage && task setup        # First time setup
-#   cd garage && task run          # Start server
-#   cd garage && task config:r2    # Configure R2 (needs .env)
+# Run with xplat task:
+#   xplat task setup        # First time setup
+#   xplat task run          # Start server
+#   xplat task config:r2    # Configure R2 (needs .env)
+#
+# Uses xplat directory convention:
+#   PLAT_BIN  → .bin/   (downloaded/built binaries)
+#   PLAT_DATA → .data/  (runtime data: pb_data, cache, logs)
 #
 # Usage:
-#   task setup            Download pocketbase-ha binary
-#   task run              Start server (foreground)
-#   task up               Start with process-compose TUI
-#   task down             Stop all processes
-#   task admin            Open admin UI in browser
-#   task config:show      Show storage config
-#   task config:r2        Configure R2 storage (from .env)
-#   task files:list       List files
-#   task files:upload     Upload a file
+#   xplat task setup            Download pocketbase-ha binary
+#   xplat task run              Start server (foreground)
+#   xplat task up               Start with process-compose TUI
+#   xplat task down             Stop all processes
+#   xplat task admin            Open admin UI in browser
+#   xplat task config:show      Show storage config
+#   xplat task config:r2        Configure R2 storage (from .env)
+#   xplat task files:list       List files
+#   xplat task files:upload     Upload a file
 #
 # URLs (Cloudflare):
-#   task url:r2           Open R2 bucket dashboard
-#   task url:r2:tokens    Open R2 API tokens page
-#   task url:r2:bucket    Open specific bucket (garage)
+#   xplat task url:r2           Open R2 bucket dashboard
+#   xplat task url:r2:tokens    Open R2 API tokens page
+#   xplat task url:r2:bucket    Open specific bucket (garage)
 #
 # Architecture:
 #   PocketBase-HA (SQLite + NATS embedded)
@@ -39,7 +43,12 @@ version: '3'
 dotenv: ['.env']
 
 vars:
-  # PocketBase-HA Release
+  # === Required by xplat archetype system ===
+  GARAGE_BIN: 'tiered{{exeExt}}'
+  GARAGE_VERSION: '0.1.0'
+  GARAGE_REPO: 'github.com/joeblew999/plat-garage'
+
+  # PocketBase-HA (external dependency)
   PBHA_VERSION: '0.2.2'
   PBHA_REPO: 'litesql/pocketbase-ha'
   PBHA_BIN: 'pocketbase-ha{{exeExt}}'
@@ -50,12 +59,13 @@ vars:
   PBHA_ADMIN_EMAIL: 'admin@garage.local'
   PBHA_ADMIN_PASS: 'admin123456'
 
-  # Directories (relative to this Taskfile)
+  # Directories - use PLAT_* from xplat, fallback for standalone task
   GARAGE_DIR: '{{.ROOT_DIR}}'
-  GARAGE_BIN_DIR: '{{.ROOT_DIR}}/bin'
-  GARAGE_DATA_DIR: '{{.ROOT_DIR}}/pb_data'
+  GARAGE_BIN_DIR: '{{.PLAT_BIN | default ".bin"}}'
+  GARAGE_DATA_DIR: '{{.PLAT_DATA | default ".data"}}'
 
-  # Full binary path
+  # Full binary paths
+  GARAGE_CMD: '{{.GARAGE_BIN_DIR}}/{{.GARAGE_BIN}}'
   PBHA_CMD: '{{.GARAGE_BIN_DIR}}/{{.PBHA_BIN}}'
 
   # API URL
@@ -526,73 +536,73 @@ tasks:
   tiered:build:
     desc: Build tiered storage binary
     cmds:
-      - |
-        go build -o "{{.GARAGE_BIN_DIR}}/tiered{{exeExt}}" ./cmd/tiered/
-        echo "OK: Built {{.GARAGE_BIN_DIR}}/tiered"
+      - mkdir -p "{{.GARAGE_BIN_DIR}}"
+      - go build -o "{{.GARAGE_CMD}}" ./cmd/tiered/
+      - 'echo "OK: Built {{.GARAGE_CMD}}"'
 
   tiered:serve:
     desc: Start tiered storage HTTP proxy
     deps: [tiered:build]
     cmds:
-      - mkdir -p "{{.GARAGE_DIR}}/cache"
+      - mkdir -p "{{.GARAGE_DATA_DIR}}/cache"
       - |
         echo "Starting tiered storage proxy..."
-        echo "  Tier 0 (Local): {{.GARAGE_DIR}}/cache"
+        echo "  Tier 0 (Local): {{.GARAGE_DATA_DIR}}/cache"
         echo "  Tier 1 (R2):    $R2_BUCKET"
         echo "  Tier 2 (B2):    $B2_BUCKET"
         echo "  Port:           8091"
         echo ""
-        export GARAGE_LOCAL_PATH="{{.GARAGE_DIR}}/cache"
+        export GARAGE_LOCAL_PATH="{{.GARAGE_DATA_DIR}}/cache"
         export TIERED_PORT="8091"
-        "{{.GARAGE_BIN_DIR}}/tiered{{exeExt}}" serve
+        "{{.GARAGE_CMD}}" serve
 
   tiered:sync:
     desc: Sync local cache files to R2
     deps: [tiered:build]
     cmds:
       - |
-        export GARAGE_LOCAL_PATH="{{.GARAGE_DIR}}/cache"
-        "{{.GARAGE_BIN_DIR}}/tiered{{exeExt}}" sync
+        export GARAGE_LOCAL_PATH="{{.GARAGE_DATA_DIR}}/cache"
+        "{{.GARAGE_CMD}}" sync
 
   tiered:archive:
     desc: Archive old R2 files to B2 (cold storage)
     deps: [tiered:build]
     cmds:
       - |
-        export GARAGE_LOCAL_PATH="{{.GARAGE_DIR}}/cache"
-        "{{.GARAGE_BIN_DIR}}/tiered{{exeExt}}" archive
+        export GARAGE_LOCAL_PATH="{{.GARAGE_DATA_DIR}}/cache"
+        "{{.GARAGE_CMD}}" archive
 
   tiered:status:
     desc: Show tier status (file counts, sizes)
     deps: [tiered:build]
     cmds:
       - |
-        export GARAGE_LOCAL_PATH="{{.GARAGE_DIR}}/cache"
-        "{{.GARAGE_BIN_DIR}}/tiered{{exeExt}}" status
+        export GARAGE_LOCAL_PATH="{{.GARAGE_DATA_DIR}}/cache"
+        "{{.GARAGE_CMD}}" status
 
   tiered:test:
     desc: Test tiered storage (upload, download, verify)
     deps: [tiered:build]
     cmds:
-      - mkdir -p "{{.GARAGE_DIR}}/cache"
+      - mkdir -p "{{.GARAGE_DATA_DIR}}/cache"
       - |
         # Create test file
         TEST_FILE="test_tiered_$(date +%s).txt"
-        echo "Hello from tiered storage at $(date)" > "{{.GARAGE_DIR}}/cache/$TEST_FILE"
+        echo "Hello from tiered storage at $(date)" > "{{.GARAGE_DATA_DIR}}/cache/$TEST_FILE"
         echo "OK: Created test file $TEST_FILE in local cache"
 
         # Check local
-        ls -la "{{.GARAGE_DIR}}/cache/$TEST_FILE"
+        ls -la "{{.GARAGE_DATA_DIR}}/cache/$TEST_FILE"
 
         # Sync to R2
         echo ""
         echo "Syncing to R2..."
-        export GARAGE_LOCAL_PATH="{{.GARAGE_DIR}}/cache"
-        "{{.GARAGE_BIN_DIR}}/tiered{{exeExt}}" sync
+        export GARAGE_LOCAL_PATH="{{.GARAGE_DATA_DIR}}/cache"
+        "{{.GARAGE_CMD}}" sync
 
         # Show status
         echo ""
-        "{{.GARAGE_BIN_DIR}}/tiered{{exeExt}}" status
+        "{{.GARAGE_CMD}}" status
 
         echo ""
         echo "OK: Test complete. File is in local cache and R2."
