@@ -1,8 +1,8 @@
 # Unified CI/CD workflow for plat-* repositories
 #
-# This workflow delegates everything to Taskfile for maximum portability.
-# The same commands work locally and in CI.
-# Runs on Linux, macOS, and Windows for cross-platform verification.
+# Uses xplat for cross-platform shell operations.
+# Downloads xplat binary first, then uses it for all operations.
+# Runs on Linux, macOS, and Windows.
 
 name: CI
 
@@ -14,6 +14,7 @@ on:
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  XPLAT_VERSION: "v0.1.0"
 
 jobs:
   ci:
@@ -22,10 +23,13 @@ jobs:
         include:
           - os: ubuntu-latest
             name: Linux
+            xplat_binary: xplat-linux-amd64
           - os: macos-latest
             name: macOS
+            xplat_binary: xplat-darwin-arm64
           - os: windows-latest
             name: Windows
+            xplat_binary: xplat-windows-amd64.exe
     runs-on: ${{ matrix.os }}
     name: CI (${{ matrix.name }})
     steps:
@@ -37,24 +41,35 @@ jobs:
         with:
           go-version: "stable"
 
+      - name: Install xplat (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          curl -sL "https://github.com/joeblew999/xplat/releases/download/xplat-${{ env.XPLAT_VERSION }}/${{ matrix.xplat_binary }}" -o /usr/local/bin/xplat
+          chmod +x /usr/local/bin/xplat
+          xplat version
+
+      - name: Install xplat (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\bin" | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/joeblew999/xplat/releases/download/xplat-${{ env.XPLAT_VERSION }}/${{ matrix.xplat_binary }}" -OutFile "$env:USERPROFILE\bin\xplat.exe"
+          echo "$env:USERPROFILE\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          & "$env:USERPROFILE\bin\xplat.exe" version
+
       - name: Install Task
         uses: arduino/setup-task@v2
         with:
           version: 3.x
 
       # All CI logic is in Taskfile - same commands work locally
+      # Taskfile can use xplat for cross-platform operations
       - name: Build
         run: task build
 
       - name: Test
         run: task test
 
-      - name: Lint (Unix)
-        if: runner.os != 'Windows'
-        run: task lint
-        continue-on-error: true
-
-      - name: Lint (Windows)
-        if: runner.os == 'Windows'
+      - name: Lint
         run: task lint
         continue-on-error: true
