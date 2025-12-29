@@ -43,15 +43,11 @@ version: '3'
 dotenv: ['.env']
 
 vars:
-  # === Required by xplat archetype system ===
-  GARAGE_BIN: 'tiered{{exeExt}}'
-  GARAGE_VERSION: '0.1.0'
-  GARAGE_REPO: 'github.com/joeblew999/plat-garage'
-
-  # PocketBase-HA (external dependency)
-  PBHA_VERSION: '0.2.2'
-  PBHA_REPO: 'litesql/pocketbase-ha'
-  PBHA_BIN: 'pocketbase-ha{{exeExt}}'
+  # Binaries (with {{exeExt}} for Windows)
+  GARAGE_BINARY: 'tiered{{exeExt}}'
+  PBHA_BINARY: 'pocketbase-ha{{exeExt}}'
+  PBHA_VER: '0.2.2'
+  PBHA_GITHUB: 'litesql/pocketbase-ha'
 
   # Server config
   PBHA_PORT: '8090'
@@ -65,8 +61,8 @@ vars:
   GARAGE_DATA_DIR: '{{.PLAT_DATA | default ".data"}}'
 
   # Full binary paths
-  GARAGE_CMD: '{{.GARAGE_BIN_DIR}}/{{.GARAGE_BIN}}'
-  PBHA_CMD: '{{.GARAGE_BIN_DIR}}/{{.PBHA_BIN}}'
+  GARAGE_CMD: '{{.GARAGE_BIN_DIR}}/{{.GARAGE_BINARY}}'
+  PBHA_CMD: '{{.GARAGE_BIN_DIR}}/{{.PBHA_BINARY}}'
 
   # API URL
   PBHA_URL: 'http://localhost:{{.PBHA_PORT}}'
@@ -160,9 +156,9 @@ tasks:
       - mkdir -p "{{.GARAGE_DATA_DIR}}"
       - |
         ARCHIVE="pocketbase-ha_{{.OS_NAME}}_{{.ARCH_NAME}}.{{.ARCHIVE_EXT}}"
-        URL="https://github.com/{{.PBHA_REPO}}/releases/download/v{{.PBHA_VERSION}}/${ARCHIVE}"
+        URL="https://github.com/{{.PBHA_GITHUB}}/releases/download/v{{.PBHA_VER}}/${ARCHIVE}"
 
-        echo "Downloading pocketbase-ha v{{.PBHA_VERSION}} for {{OS}}/{{ARCH}}..."
+        echo "Downloading pocketbase-ha v{{.PBHA_VER}} for {{OS}}/{{ARCH}}..."
         echo "URL: $URL"
 
         cd "{{.GARAGE_BIN_DIR}}"
@@ -175,7 +171,7 @@ tasks:
         {{end}}
 
         rm -f "$ARCHIVE"
-        chmod +x "{{.PBHA_BIN}}" 2>/dev/null || true
+        chmod +x "{{.PBHA_BINARY}}" 2>/dev/null || true
 
         echo "OK: Downloaded to {{.PBHA_CMD}}"
 
@@ -463,7 +459,7 @@ tasks:
         echo "========================================"
         echo ""
         echo "Binary:    {{.PBHA_CMD}}"
-        echo "Version:   {{.PBHA_VERSION}}"
+        echo "Version:   {{.PBHA_VER}}"
         echo "Data:      {{.GARAGE_DATA_DIR}}"
         echo ""
         echo "Server:    {{.PBHA_URL}}"
@@ -519,7 +515,7 @@ tasks:
     desc: Open PocketBase-HA GitHub releases
     cmds:
       - |
-        URL="https://github.com/{{.PBHA_REPO}}/releases"
+        URL="https://github.com/{{.PBHA_GITHUB}}/releases"
         echo "Opening $URL"
         {{if eq OS "darwin"}}open "$URL"{{else if eq OS "linux"}}xdg-open "$URL"{{else}}start "$URL"{{end}}
 
