@@ -36,6 +36,8 @@
 #
 # Documentation: ../TODO_GARAGE.md
 #
+# Cross-platform: Uses xplat utilities (mkdir, rm, etc.) for Windows compatibility
+#
 # Pattern: All tool taskfiles define TOOL_BIN with {{exeExt}} for Windows support
 
 version: '3'
@@ -81,7 +83,7 @@ tasks:
     desc: Ensure pocketbase-ha is installed
     run: once
     status:
-      - test -f "{{.PBHA_CMD}}"
+      - '{{if eq OS "windows"}}if exist "{{.PBHA_CMD}}" (exit 0) else (exit 1){{else}}test -f "{{.PBHA_CMD}}"{{end}}'
     cmds:
       - task: download
 
@@ -150,10 +152,10 @@ tasks:
             *) echo "tar.gz" ;;
           esac
     status:
-      - test -f "{{.PBHA_CMD}}"
+      - '{{if eq OS "windows"}}if exist "{{.PBHA_CMD}}" (exit 0) else (exit 1){{else}}test -f "{{.PBHA_CMD}}"{{end}}'
     cmds:
-      - mkdir -p "{{.GARAGE_BIN_DIR}}"
-      - mkdir -p "{{.GARAGE_DATA_DIR}}"
+      - xplat mkdir -p "{{.GARAGE_BIN_DIR}}"
+      - xplat mkdir -p "{{.GARAGE_DATA_DIR}}"
       - |
         ARCHIVE="pocketbase-ha_{{.OS_NAME}}_{{.ARCH_NAME}}.{{.ARCHIVE_EXT}}"
         URL="https://github.com/{{.PBHA_GITHUB}}/releases/download/v{{.PBHA_VER}}/${ARCHIVE}"
@@ -170,8 +172,8 @@ tasks:
         tar -xzf "$ARCHIVE"
         {{end}}
 
-        rm -f "$ARCHIVE"
-        chmod +x "{{.PBHA_BINARY}}" 2>/dev/null || true
+        xplat rm -f "$ARCHIVE"
+        {{if ne OS "windows"}}chmod +x "{{.PBHA_BINARY}}" 2>/dev/null || true{{end}}
 
         echo "OK: Downloaded to {{.PBHA_CMD}}"
 
@@ -440,8 +442,8 @@ tasks:
     desc: Remove all GARAGE data and binaries
     prompt: This will delete all GARAGE data. Continue?
     cmds:
-      - rm -rf "{{.GARAGE_BIN_DIR}}"
-      - rm -rf "{{.GARAGE_DATA_DIR}}"
+      - xplat rm -rf "{{.GARAGE_BIN_DIR}}"
+      - xplat rm -rf "{{.GARAGE_DATA_DIR}}"
       - echo "OK - Cleaned GARAGE data and binaries"
 
   version:
@@ -532,7 +534,7 @@ tasks:
   tiered:build:
     desc: Build tiered storage binary
     cmds:
-      - mkdir -p "{{.GARAGE_BIN_DIR}}"
+      - xplat mkdir -p "{{.GARAGE_BIN_DIR}}"
       - go build -o "{{.GARAGE_CMD}}" ./cmd/tiered/
       - 'echo "OK: Built {{.GARAGE_CMD}}"'
 
@@ -540,7 +542,7 @@ tasks:
     desc: Start tiered storage HTTP proxy
     deps: [tiered:build]
     cmds:
-      - mkdir -p "{{.GARAGE_DATA_DIR}}/cache"
+      - xplat mkdir -p "{{.GARAGE_DATA_DIR}}/cache"
       - |
         echo "Starting tiered storage proxy..."
         echo "  Tier 0 (Local): {{.GARAGE_DATA_DIR}}/cache"
@@ -580,7 +582,7 @@ tasks:
     desc: Test tiered storage (upload, download, verify)
     deps: [tiered:build]
     cmds:
-      - mkdir -p "{{.GARAGE_DATA_DIR}}/cache"
+      - xplat mkdir -p "{{.GARAGE_DATA_DIR}}/cache"
       - |
         # Create test file
         TEST_FILE="test_tiered_$(date +%s).txt"
