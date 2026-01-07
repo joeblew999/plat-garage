@@ -7,14 +7,7 @@ Tiered storage: local cache → R2 (hot) → B2 (cold archive).
 Install [xplat](https://github.com/joeblew999/xplat) first:
 
 ```bash
-# macOS (Apple Silicon)
-curl -sL https://github.com/joeblew999/xplat/releases/latest/download/xplat-darwin-arm64 -o /usr/local/bin/xplat && chmod +x /usr/local/bin/xplat
-
-# macOS (Intel)
-curl -sL https://github.com/joeblew999/xplat/releases/latest/download/xplat-darwin-amd64 -o /usr/local/bin/xplat && chmod +x /usr/local/bin/xplat
-
-# Linux (x86_64)
-curl -sL https://github.com/joeblew999/xplat/releases/latest/download/xplat-linux-amd64 -o ~/.local/bin/xplat && chmod +x ~/.local/bin/xplat
+curl -fsSL https://raw.githubusercontent.com/joeblew999/xplat/main/install.sh | sh
 ```
 
 ## Quick Start
