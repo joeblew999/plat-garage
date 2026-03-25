@@ -2,16 +2,22 @@
 #
 # Orchestrates the tiered storage stack:
 #   - pocketbase-ha: Core API + SQLite + NATS (embedded)
+#   - sync-gh:       GitHub event polling (disabled by default)
+#   - sync-cf:       Cloudflare audit log polling (disabled by default)
 #
 # Usage:
-#   task garage:up       Start with TUI
-#   task garage:down     Stop all
+#   xplat task up           Start with TUI
+#   xplat task up:detached  Start headless
+#   xplat service install   Install as system service
 #
-# Future additions:
-#   - rclone sync worker (local <-> R2 <-> B2)
-#   - archive cron job
+# To enable sync services:
+#   1. Add credentials to .env (GITHUB_TOKEN, CF_API_TOKEN, etc.)
+#   2. Set disabled: false for the services you want
 
 version: "0.5"
+
+# Port is set dynamically by Taskfile based on project path hash
+# This avoids conflicts when running multiple projects
 
 log_level: info
 log_length: 1000
@@ -21,7 +27,7 @@ processes:
   # PocketBase-HA - Core API Server
   # ===========================================================================
   pocketbase-ha:
-    command: ./bin/pocketbase-ha serve --http=0.0.0.0:8090 --dir=./pb_data
+    command: ./.bin/pocketbase-ha serve --http=0.0.0.0:8090 --dir=./.data
     working_dir: .
     availability:
       restart: on_failure
@@ -37,40 +43,107 @@ processes:
       timeout_seconds: 3
       failure_threshold: 3
     shutdown:
-      signal: SIGTERM
+      signal: 15
       timeout_seconds: 10
     environment:
-      # PocketBase-HA NATS configuration (embedded)
-      # Uncomment and configure for multi-node clustering:
-      # PB_NATS_PORT: "4222"
-      # PB_NATS_CLUSTER_NAME: "garage"
-      # PB_NATS_CLUSTER_PORT: "6222"
-      # PB_NATS_ROUTES: "nats://node2:6222,nats://node3:6222"
+      - DUMMY=placeholder
 
-      # Leader mode: "static" or "leaderless"
-      # PB_LEADER_MODE: "leaderless"
+  # ===========================================================================
+  # GitHub Sync - Polls GitHub for events
+  # ===========================================================================
+  sync-gh:
+    command: xplat sync-gh poll --interval=5m
+    disabled: true  # Enable when configured
+    depends_on:
+      pocketbase-ha:
+        condition: process_healthy
+    availability:
+      restart: on_failure
+      backoff_seconds: 30
+      max_restarts: 5
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
 
-      # For static leader:
-      # PB_LEADER_HOST: "node1:8090"
-      DUMMY: "placeholder"
+  # ===========================================================================
+  # Cloudflare Sync - Polls CF audit logs
+  # ===========================================================================
+  sync-cf:
+    command: xplat sync-cf poll --interval=5m
+    disabled: true  # Enable when configured
+    depends_on:
+      pocketbase-ha:
+        condition: process_healthy
+    availability:
+      restart: on_failure
+      backoff_seconds: 30
+      max_restarts: 5
+    environment:
+      - CF_ACCOUNT_ID=${CF_ACCOUNT_ID}
+      - CF_API_TOKEN=${CF_API_TOKEN}
+
+  # ===========================================================================
+  # Cloudflare Tunnel (optional) - Expose local services
+  # ===========================================================================
+  # cf-tunnel:
+  #   command: xplat sync-cf tunnel 8090
+  #   disabled: true
+  #   depends_on:
+  #     pocketbase-ha:
+  #       condition: process_healthy
+
+  # ===========================================================================
+  # MCP Server - Exposes Taskfile tasks to AI assistants (HTTP mode)
+  # ===========================================================================
+  mcp-server:
+    command: xplat mcp serve --http :8765
+    disabled: true  # Enable for AI IDE integration via HTTP
+    availability:
+      restart: on_failure
+      backoff_seconds: 5
+      max_restarts: 3
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: 8765
+        path: /mcp
+      initial_delay_seconds: 1
+      period_seconds: 5
+    # Configure Crush to use HTTP transport:
+    # {
+    #   "mcp": {
+    #     "xplat": {
+    #       "type": "http",
+    #       "url": "http://localhost:8765/mcp"
+    #     }
+    #   }
+    # }
+
+  # ===========================================================================
+  # RustFS - S3-compatible Object Storage
+  # ===========================================================================
+  rustfs:
+    command: ./.bin/rustfs server --address 0.0.0.0:9000 --console-address 0.0.0.0:9001 ./.data/rustfs
+    disabled: true  # Enable when you want local S3 storage
+    availability:
+      restart: on_failure
+      backoff_seconds: 5
+      max_restarts: 3
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: 9001
+        path: /
+      initial_delay_seconds: 2
+      period_seconds: 5
+    environment:
+      - RUSTFS_ROOT_USER=${RUSTFS_ROOT_USER:-admin}
+      - RUSTFS_ROOT_PASSWORD=${RUSTFS_ROOT_PASSWORD:-password123}
 
   # ===========================================================================
   # Future: rclone Sync Worker
   # ===========================================================================
   # rclone-sync:
   #   command: ./bin/rclone-worker --config=./rclone.conf
-  #   disabled: true
-  #   depends_on:
-  #     pocketbase-ha:
-  #       condition: process_healthy
-  #   availability:
-  #     restart: on_failure
-
-  # ===========================================================================
-  # Future: Archive Cron (R2 -> B2)
-  # ===========================================================================
-  # archive-cron:
-  #   command: ./bin/archive-worker --interval=24h
   #   disabled: true
   #   depends_on:
   #     pocketbase-ha:

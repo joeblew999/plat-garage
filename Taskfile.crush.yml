@@ -1,0 +1,238 @@
+# Charm Crush - Terminal AI Coding Agent with MCP Support
+#
+# Crush is a terminal-based AI assistant that supports MCP (Model Context Protocol).
+# It can connect to MCP servers like `xplat mcp serve` to execute Taskfile tasks.
+#
+# Include in your project:
+#   includes:
+#     crush:
+#       taskfile: ./Taskfile.crush.yml
+#
+# Usage:
+#   xplat task crush:setup      # Install Crush binary
+#   xplat task crush:config     # Configure Crush to use xplat MCP
+#   xplat task crush:run        # Start Crush
+
+version: '3'
+
+vars:
+  CRUSH_VER: '0.32.1'
+  CRUSH_GITHUB: 'charmbracelet/crush'
+  CRUSH_BIN_DIR: '{{.HOME}}/.local/bin'
+  CRUSH_CONFIG_DIR: '{{.HOME}}/.config/crush'
+
+  # Platform detection for download URL
+  CRUSH_OS:
+    sh: |
+      case "$(uname -s)" in
+        Darwin) echo "Darwin" ;;
+        Linux)  echo "Linux" ;;
+        MINGW*|MSYS*|CYGWIN*) echo "Windows" ;;
+        *) echo "Linux" ;;
+      esac
+
+  CRUSH_ARCH:
+    sh: |
+      case "$(uname -m)" in
+        x86_64|amd64) echo "x86_64" ;;
+        arm64|aarch64) echo "arm64" ;;
+        armv7*) echo "armv7" ;;
+        i386|i686) echo "i386" ;;
+        *) echo "x86_64" ;;
+      esac
+
+  CRUSH_EXT:
+    sh: |
+      case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) echo "zip" ;;
+        *) echo "tar.gz" ;;
+      esac
+
+tasks:
+  # ===========================================================================
+  # Setup
+  # ===========================================================================
+
+  setup:
+    desc: Install Crush (terminal AI coding agent)
+    cmds:
+      - task: download
+      - task: config
+      - cmd: echo ""
+      - cmd: echo "OK - Crush installed and configured!"
+      - cmd: echo "Run 'crush' or 'xplat task crush:run' to start"
+
+  download:
+    desc: Download Crush binary
+    vars:
+      CRUSH_URL: 'https://github.com/{{.CRUSH_GITHUB}}/releases/download/v{{.CRUSH_VER}}/crush_{{.CRUSH_VER}}_{{.CRUSH_OS}}_{{.CRUSH_ARCH}}.{{.CRUSH_EXT}}'
+    cmds:
+      - cmd: echo "Downloading Crush v{{.CRUSH_VER}}..."
+      - cmd: echo "URL - {{.CRUSH_URL}}"
+      - cmd: xplat os mkdir -p "{{.CRUSH_BIN_DIR}}"
+      - cmd: xplat os fetch --extract "{{.CRUSH_URL}}" --output "{{.CRUSH_BIN_DIR}}"
+      - cmd: chmod +x "{{.CRUSH_BIN_DIR}}/crush" 2>/dev/null || true
+      - cmd: echo ""
+      - cmd: echo "OK - Crush v{{.CRUSH_VER}} installed to {{.CRUSH_BIN_DIR}}/crush"
+
+  # ===========================================================================
+  # Configuration
+  # ===========================================================================
+
+  config:
+    desc: Configure Crush to use xplat MCP server
+    cmds:
+      - cmd: xplat os mkdir -p "{{.CRUSH_CONFIG_DIR}}"
+      - |
+        cat > "{{.CRUSH_CONFIG_DIR}}/crush.json" << 'EOF'
+        {
+          "mcp": {
+            "xplat": {
+              "type": "stdio",
+              "command": "xplat",
+              "args": ["mcp", "serve"],
+              "timeout": 120,
+              "disabled": false
+            }
+          }
+        }
+        EOF
+      - cmd: echo "OK - Crush config written to {{.CRUSH_CONFIG_DIR}}/crush.json"
+      - cmd: echo ""
+      - cmd: echo "Crush will now connect to xplat MCP server automatically."
+      - cmd: echo "All your Taskfile tasks will be available as tools!"
+
+  config:show:
+    desc: Show current Crush configuration
+    cmds:
+      - |
+        if [ -f "{{.CRUSH_CONFIG_DIR}}/crush.json" ]; then
+          echo "Current Crush config ({{.CRUSH_CONFIG_DIR}}/crush.json):"
+          echo ""
+          cat "{{.CRUSH_CONFIG_DIR}}/crush.json"
+        else
+          echo "No Crush config found. Run 'xplat task crush:config' to create one."
+        fi
+
+  config:add-mcp:
+    desc: Add an MCP server to Crush config
+    vars:
+      MCP_NAME: '{{.MCP_NAME | default "custom"}}'
+      MCP_COMMAND: '{{.MCP_COMMAND | default "echo"}}'
+      MCP_ARGS: '{{.MCP_ARGS | default "[]"}}'
+    cmds:
+      - |
+        echo "To add a custom MCP server, edit {{.CRUSH_CONFIG_DIR}}/crush.json"
+        echo ""
+        echo "Example format:"
+        cat << 'EOF'
+        {
+          "mcp": {
+            "xplat": {
+              "type": "stdio",
+              "command": "xplat",
+              "args": ["mcp", "serve"]
+            },
+            "filesystem": {
+              "type": "stdio",
+              "command": "npx",
+              "args": ["-y", "@anthropic-ai/mcp-server-filesystem", "/path/to/dir"]
+            }
+          }
+        }
+        EOF
+
+  # ===========================================================================
+  # Run
+  # ===========================================================================
+
+  run:
+    desc: Start Crush in current directory
+    cmds:
+      - |
+        if ! command -v crush &> /dev/null; then
+          echo "Crush not found. Run 'xplat task crush:setup' first."
+          exit 1
+        fi
+        crush
+
+  run:debug:
+    desc: Start Crush with debug logging
+    cmds:
+      - crush -d
+
+  run:yolo:
+    desc: Start Crush in auto-accept mode (dangerous!)
+    cmds:
+      - |
+        echo "WARNING: This will auto-accept all permissions!"
+        echo ""
+        crush -y
+
+  # ===========================================================================
+  # Status & Info
+  # ===========================================================================
+
+  version:
+    desc: Show installed Crush version
+    cmds:
+      - crush --version 2>/dev/null || echo "Crush not installed"
+
+  status:
+    desc: Check Crush installation status
+    cmds:
+      - |
+        echo "Crush Status"
+        echo "============"
+        echo ""
+
+        # Check binary
+        if command -v crush &> /dev/null; then
+          echo "Binary:  $(which crush)"
+          echo "Version: $(crush --version 2>/dev/null || echo 'unknown')"
+        else
+          echo "Binary:  NOT INSTALLED"
+          echo "         Run 'xplat task crush:setup' to install"
+        fi
+        echo ""
+
+        # Check config
+        if [ -f "{{.CRUSH_CONFIG_DIR}}/crush.json" ]; then
+          echo "Config:  {{.CRUSH_CONFIG_DIR}}/crush.json"
+          echo "MCPs:    $(cat "{{.CRUSH_CONFIG_DIR}}/crush.json" | jq -r '.mcp | keys | join(", ")' 2>/dev/null || echo 'unknown')"
+        else
+          echo "Config:  NOT CONFIGURED"
+          echo "         Run 'xplat task crush:config' to configure"
+        fi
+
+  # ===========================================================================
+  # Cleanup
+  # ===========================================================================
+
+  clean:
+    desc: Remove Crush binary and config
+    prompt: This will remove Crush. Continue?
+    cmds:
+      - xplat os rm -f "{{.CRUSH_BIN_DIR}}/crush"
+      - xplat os rm -rf "{{.CRUSH_CONFIG_DIR}}"
+      - cmd: echo "OK - Crush removed"
+
+  # ===========================================================================
+  # URLs
+  # ===========================================================================
+
+  url:github:
+    desc: Open Crush GitHub repository
+    cmds:
+      - |
+        URL="https://github.com/{{.CRUSH_GITHUB}}"
+        echo "Opening $URL"
+        {{if eq OS "darwin"}}open "$URL"{{else if eq OS "linux"}}xdg-open "$URL"{{else}}start "$URL"{{end}}
+
+  url:docs:
+    desc: Open Charm documentation
+    cmds:
+      - |
+        URL="https://charm.sh/crush"
+        echo "Opening $URL"
+        {{if eq OS "darwin"}}open "$URL"{{else if eq OS "linux"}}xdg-open "$URL"{{else}}start "$URL"{{end}}

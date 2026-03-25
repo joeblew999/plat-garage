@@ -44,6 +44,15 @@ version: '3'
 
 dotenv: ['.env']
 
+# Includes
+includes:
+  dev:
+    taskfile: ./taskfiles/Taskfile.xplat-dev.yml
+  rustfs:
+    taskfile: ./Taskfile.rustfs.yml
+  crush:
+    taskfile: ./Taskfile.crush.yml
+
 vars:
   # Binaries (with {{exeExt}} for Windows)
   GARAGE_BINARY: 'tiered{{exeExt}}'
@@ -68,6 +77,10 @@ vars:
 
   # API URL
   PBHA_URL: 'http://localhost:{{.PBHA_PORT}}'
+
+  # Process-compose port (deterministic from project path to avoid conflicts)
+  # Range: 18000-18999 based on hash of ROOT_DIR
+  PC_PORT: '{{.PC_PORT | default "18080"}}'
 
   # Cloudflare R2
   CF_ACCOUNT_ID: '7384af54e33b8a54ff240371ea368440'
@@ -211,32 +224,38 @@ tasks:
     deps: [check:deps]
     dir: '{{.GARAGE_DIR}}'
     cmds:
-      - process-compose up -f process-compose.yml
+      - process-compose up -f process-compose.yml -p {{.PC_PORT}}
 
   up:detached:
     desc: Start GARAGE stack in background
     deps: [check:deps]
     dir: '{{.GARAGE_DIR}}'
     cmds:
-      - process-compose up -f process-compose.yml -t=false -d
+      - process-compose up -f process-compose.yml -p {{.PC_PORT}} -t=false -d
 
   down:
     desc: Stop GARAGE stack
     dir: '{{.GARAGE_DIR}}'
     cmds:
-      - process-compose down -f process-compose.yml 2>/dev/null || pkill -f pocketbase-ha || true
+      - process-compose down -f process-compose.yml -p {{.PC_PORT}} 2>/dev/null || pkill -f pocketbase-ha || true
 
   logs:
     desc: View GARAGE logs
     dir: '{{.GARAGE_DIR}}'
     cmds:
-      - process-compose logs -f process-compose.yml
+      - process-compose logs -f process-compose.yml -p {{.PC_PORT}}
 
   status:
     desc: Show GARAGE process status
     dir: '{{.GARAGE_DIR}}'
     cmds:
-      - process-compose process list -f process-compose.yml 2>/dev/null || task garage:check:running
+      - process-compose process list -f process-compose.yml -p {{.PC_PORT}} 2>/dev/null || task check:running
+
+  attach:
+    desc: Attach TUI to running GARAGE stack
+    dir: '{{.GARAGE_DIR}}'
+    cmds:
+      - process-compose attach -p {{.PC_PORT}}
 
   # ===========================================================================
   # Configuration (via API)

@@ -1,0 +1,461 @@
+# RustFS - High-Performance S3-Compatible Object Storage
+#
+# RustFS is 2.3x faster than MinIO for small objects, Apache 2.0 licensed.
+# https://rustfs.com | https://github.com/rustfs/rustfs
+#
+# Run with xplat task:
+#   xplat task rustfs:setup       # Download RustFS binary
+#   xplat task rustfs:run         # Start RustFS server
+#   xplat task rustfs:mcp:setup   # Setup MCP server for AI IDEs
+#
+# Uses xplat directory convention:
+#   PLAT_BIN  → .bin/   (downloaded binaries)
+#   PLAT_DATA → .data/  (runtime data)
+
+version: '3'
+
+# Note: dotenv must be in main Taskfile, not included files
+
+vars:
+  # RustFS version
+  RUSTFS_VER: '1.0.0-alpha.79'
+  RUSTFS_GITHUB: 'rustfs/rustfs'
+
+  # Binaries (with {{exeExt}} for Windows)
+  RUSTFS_BINARY: 'rustfs{{exeExt}}'
+  RUSTFS_MCP_BINARY: 'rustfs-mcp{{exeExt}}'
+
+  # Directories
+  RUSTFS_BIN_DIR: '{{.PLAT_BIN | default ".bin"}}'
+  RUSTFS_DATA_DIR: '{{.PLAT_DATA | default ".data"}}/rustfs'
+
+  # Full binary paths
+  RUSTFS_CMD: '{{.RUSTFS_BIN_DIR}}/{{.RUSTFS_BINARY}}'
+  RUSTFS_MCP_CMD: '{{.RUSTFS_BIN_DIR}}/{{.RUSTFS_MCP_BINARY}}'
+
+  # Server config
+  RUSTFS_PORT: '9000'
+  RUSTFS_CONSOLE_PORT: '9001'
+  RUSTFS_HOST: '0.0.0.0'
+
+  # Default credentials (override in .env)
+  RUSTFS_ACCESS_KEY: '{{.RUSTFS_ACCESS_KEY | default "minioadmin"}}'
+  RUSTFS_SECRET_KEY: '{{.RUSTFS_SECRET_KEY | default "minioadmin"}}'
+
+  # URLs
+  RUSTFS_URL: 'http://localhost:{{.RUSTFS_PORT}}'
+  RUSTFS_CONSOLE_URL: 'http://localhost:{{.RUSTFS_CONSOLE_PORT}}'
+
+tasks:
+  # ===========================================================================
+  # Setup & Download
+  # ===========================================================================
+
+  setup:
+    desc: Download RustFS binary for your platform
+    cmds:
+      - task: download
+      - cmd: echo "OK - RustFS v{{.RUSTFS_VER}} installed to {{.RUSTFS_CMD}}"
+
+  download:
+    desc: Download RustFS binary
+    internal: true
+    vars:
+      # Map platform/arch to RustFS naming
+      PLATFORM_NAME:
+        sh: |
+          case "{{OS}}" in
+            darwin) echo "macos" ;;
+            linux) echo "linux" ;;
+            windows) echo "windows" ;;
+          esac
+      ARCH_NAME:
+        sh: |
+          case "{{ARCH}}" in
+            amd64) echo "x86_64" ;;
+            arm64) echo "aarch64" ;;
+            386) echo "x86_64" ;;
+            *) echo "x86_64" ;;
+          esac
+      # Linux uses musl by default for static binaries
+      VARIANT:
+        sh: |
+          case "{{OS}}" in
+            linux) echo "-musl" ;;
+            *) echo "" ;;
+          esac
+    status:
+      - '{{if eq OS "windows"}}if exist "{{.RUSTFS_CMD}}" (exit 0) else (exit 1){{else}}test -f "{{.RUSTFS_CMD}}"{{end}}'
+    cmds:
+      - xplat mkdir -p "{{.RUSTFS_BIN_DIR}}"
+      - xplat mkdir -p "{{.RUSTFS_DATA_DIR}}"
+      - |
+        ARCHIVE="rustfs-{{.PLATFORM_NAME}}-{{.ARCH_NAME}}{{.VARIANT}}-v{{.RUSTFS_VER}}.zip"
+        URL="https://github.com/{{.RUSTFS_GITHUB}}/releases/download/{{.RUSTFS_VER}}/${ARCHIVE}"
+
+        echo "Downloading RustFS v{{.RUSTFS_VER}} for {{OS}}/{{ARCH}}..."
+        echo "URL: $URL"
+
+        cd "{{.RUSTFS_BIN_DIR}}"
+        curl -sL "$URL" -o "$ARCHIVE"
+
+        {{if eq OS "windows"}}
+        unzip -o "$ARCHIVE"
+        {{else}}
+        unzip -o "$ARCHIVE"
+        {{end}}
+
+        xplat rm -f "$ARCHIVE"
+        {{if ne OS "windows"}}chmod +x "{{.RUSTFS_BINARY}}" 2>/dev/null || true{{end}}
+
+        echo "OK: Downloaded to {{.RUSTFS_CMD}}"
+
+  # ===========================================================================
+  # Check & Validate
+  # ===========================================================================
+
+  check:deps:
+    desc: Ensure RustFS is installed
+    run: once
+    status:
+      - '{{if eq OS "windows"}}if exist "{{.RUSTFS_CMD}}" (exit 0) else (exit 1){{else}}test -f "{{.RUSTFS_CMD}}"{{end}}'
+    cmds:
+      - task: download
+
+  check:running:
+    desc: Check if RustFS server is running
+    cmds:
+      - |
+        if curl -s "{{.RUSTFS_URL}}/minio/health/live" >/dev/null 2>&1; then
+          echo "OK: RustFS running at {{.RUSTFS_URL}}"
+        else
+          echo "ERROR: RustFS not running"
+          echo "Run: xplat task rustfs:run"
+          exit 1
+        fi
+
+  # ===========================================================================
+  # Run Server
+  # ===========================================================================
+
+  run:
+    desc: Run RustFS server (foreground)
+    deps: [check:deps]
+    cmds:
+      - xplat mkdir -p "{{.RUSTFS_DATA_DIR}}"
+      - |
+        echo "Starting RustFS..."
+        echo "  S3 API:   {{.RUSTFS_URL}}"
+        echo "  Console:  {{.RUSTFS_CONSOLE_URL}}"
+        echo "  Data:     {{.RUSTFS_DATA_DIR}}"
+        echo ""
+        echo "Credentials:"
+        echo "  Access Key: {{.RUSTFS_ACCESS_KEY}}"
+        echo "  Secret Key: {{.RUSTFS_SECRET_KEY}}"
+        echo ""
+
+        export RUSTFS_ROOT_USER="{{.RUSTFS_ACCESS_KEY}}"
+        export RUSTFS_ROOT_PASSWORD="{{.RUSTFS_SECRET_KEY}}"
+
+        "{{.RUSTFS_CMD}}" server "{{.RUSTFS_DATA_DIR}}" \
+          --address ":{{.RUSTFS_PORT}}" \
+          --console-address ":{{.RUSTFS_CONSOLE_PORT}}"
+
+  # ===========================================================================
+  # MCP Server (Model Context Protocol for AI IDEs)
+  # ===========================================================================
+
+  mcp:setup:
+    desc: Build RustFS MCP server from source
+    cmds:
+      - |
+        echo "Building RustFS MCP server..."
+        echo ""
+        echo "Prerequisites: Rust 1.75+"
+        echo ""
+
+        # Check if cargo is available
+        if ! command -v cargo &> /dev/null; then
+          echo "ERROR: Rust/Cargo not found"
+          echo "Install from: https://rustup.rs"
+          exit 1
+        fi
+
+        # Clone and build
+        TEMP_DIR=$(mktemp -d)
+        cd "$TEMP_DIR"
+
+        git clone --depth 1 https://github.com/{{.RUSTFS_GITHUB}}.git
+        cd rustfs
+
+        cargo build --release -p rustfs-mcp
+
+        # Copy binary
+        cp target/release/rustfs-mcp{{exeExt}} "{{.RUSTFS_MCP_CMD}}"
+        {{if ne OS "windows"}}chmod +x "{{.RUSTFS_MCP_CMD}}"{{end}}
+
+        # Cleanup
+        cd /
+        rm -rf "$TEMP_DIR"
+
+        echo ""
+        echo "OK: Built {{.RUSTFS_MCP_CMD}}"
+
+  mcp:docker:
+    desc: Pull RustFS MCP Docker image
+    cmds:
+      - |
+        docker pull rustfs/rustfs-mcp:latest
+        echo "OK: Pulled rustfs/rustfs-mcp:latest"
+
+  mcp:run:
+    desc: Run RustFS MCP server (for testing)
+    cmds:
+      - |
+        echo "Starting RustFS MCP server..."
+        echo ""
+        echo "This server provides S3 tools to AI assistants."
+        echo "Configure in your AI IDE (Claude Desktop, Cursor, etc.)"
+        echo ""
+
+        # Check if using Docker or binary
+        if [ -f "{{.RUSTFS_MCP_CMD}}" ]; then
+          echo "Using binary: {{.RUSTFS_MCP_CMD}}"
+          "{{.RUSTFS_MCP_CMD}}" \
+            --access-key-id "{{.RUSTFS_ACCESS_KEY}}" \
+            --secret-access-key "{{.RUSTFS_SECRET_KEY}}" \
+            --endpoint-url "{{.RUSTFS_URL}}" \
+            --region "us-east-1"
+        else
+          echo "Using Docker..."
+          docker run --rm -i \
+            -e AWS_ACCESS_KEY_ID="{{.RUSTFS_ACCESS_KEY}}" \
+            -e AWS_SECRET_ACCESS_KEY="{{.RUSTFS_SECRET_KEY}}" \
+            -e AWS_ENDPOINT_URL="{{.RUSTFS_URL}}" \
+            -e AWS_REGION="us-east-1" \
+            rustfs/rustfs-mcp:latest
+        fi
+
+  mcp:config:
+    desc: Show MCP configuration for AI IDEs
+    cmds:
+      - |
+        echo "========================================"
+        echo "RustFS MCP Configuration"
+        echo "========================================"
+        echo ""
+        echo "Add to your AI IDE settings (Claude Desktop, Cursor, etc.):"
+        echo ""
+        echo "Option 1: Using Docker (recommended)"
+        echo "----------------------------------------"
+        cat << 'EOF'
+        {
+          "mcpServers": {
+            "rustfs-mcp": {
+              "command": "docker",
+              "args": [
+                "run", "--rm", "-i",
+                "-e", "AWS_ACCESS_KEY_ID",
+                "-e", "AWS_SECRET_ACCESS_KEY",
+                "-e", "AWS_REGION",
+                "-e", "AWS_ENDPOINT_URL",
+                "rustfs/rustfs-mcp:latest"
+              ],
+              "env": {
+                "AWS_ACCESS_KEY_ID": "{{.RUSTFS_ACCESS_KEY}}",
+                "AWS_SECRET_ACCESS_KEY": "{{.RUSTFS_SECRET_KEY}}",
+                "AWS_REGION": "us-east-1",
+                "AWS_ENDPOINT_URL": "{{.RUSTFS_URL}}"
+              }
+            }
+          }
+        }
+        EOF
+        echo ""
+        echo "Option 2: Using Binary"
+        echo "----------------------------------------"
+        cat << EOF
+        {
+          "mcpServers": {
+            "rustfs-mcp": {
+              "command": "{{.RUSTFS_MCP_CMD}}",
+              "args": [
+                "--access-key-id", "{{.RUSTFS_ACCESS_KEY}}",
+                "--secret-access-key", "{{.RUSTFS_SECRET_KEY}}",
+                "--endpoint-url", "{{.RUSTFS_URL}}",
+                "--region", "us-east-1"
+              ]
+            }
+          }
+        }
+        EOF
+        echo ""
+        echo "Available MCP Tools:"
+        echo "  - list_buckets    List all S3 buckets"
+        echo "  - list_objects    Browse bucket contents"
+        echo "  - upload_file     Upload files with MIME detection"
+        echo "  - get_object      Download objects"
+        echo "  - create_bucket   Create new buckets"
+        echo "  - delete_bucket   Remove buckets"
+        echo ""
+
+  # ===========================================================================
+  # Bucket Operations
+  # ===========================================================================
+
+  bucket:list:
+    desc: List all buckets
+    deps: [check:running]
+    cmds:
+      - |
+        export AWS_ACCESS_KEY_ID="{{.RUSTFS_ACCESS_KEY}}"
+        export AWS_SECRET_ACCESS_KEY="{{.RUSTFS_SECRET_KEY}}"
+
+        aws --endpoint-url "{{.RUSTFS_URL}}" s3 ls
+
+  bucket:create:
+    desc: Create a bucket (BUCKET=name)
+    deps: [check:running]
+    requires:
+      vars: [BUCKET]
+    cmds:
+      - |
+        export AWS_ACCESS_KEY_ID="{{.RUSTFS_ACCESS_KEY}}"
+        export AWS_SECRET_ACCESS_KEY="{{.RUSTFS_SECRET_KEY}}"
+
+        aws --endpoint-url "{{.RUSTFS_URL}}" s3 mb "s3://{{.BUCKET}}"
+        echo "OK: Created bucket {{.BUCKET}}"
+
+  # ===========================================================================
+  # Utilities
+  # ===========================================================================
+
+  console:
+    desc: Open RustFS web console in browser
+    cmds:
+      - |
+        URL="{{.RUSTFS_CONSOLE_URL}}"
+        echo "Opening $URL"
+        echo "Login: {{.RUSTFS_ACCESS_KEY}} / {{.RUSTFS_SECRET_KEY}}"
+        {{if eq OS "darwin"}}open "$URL"{{else if eq OS "linux"}}xdg-open "$URL"{{else}}start "$URL"{{end}}
+
+  version:
+    desc: Show RustFS version
+    deps: [check:deps]
+    cmds:
+      - '"{{.RUSTFS_CMD}}" --version'
+
+  debug:
+    desc: Show RustFS configuration
+    cmds:
+      - |
+        echo "========================================"
+        echo "RustFS Configuration"
+        echo "========================================"
+        echo ""
+        echo "Binary:      {{.RUSTFS_CMD}}"
+        echo "Version:     {{.RUSTFS_VER}}"
+        echo "Data:        {{.RUSTFS_DATA_DIR}}"
+        echo ""
+        echo "S3 API:      {{.RUSTFS_URL}}"
+        echo "Console:     {{.RUSTFS_CONSOLE_URL}}"
+        echo ""
+        echo "Access Key:  {{.RUSTFS_ACCESS_KEY}}"
+        echo "Secret Key:  {{.RUSTFS_SECRET_KEY}}"
+        echo ""
+        echo "MCP Binary:  {{.RUSTFS_MCP_CMD}}"
+        echo ""
+        echo "========================================"
+
+  clean:
+    desc: Remove RustFS data and binaries
+    prompt: This will delete all RustFS data. Continue?
+    cmds:
+      - xplat rm -f "{{.RUSTFS_CMD}}"
+      - xplat rm -f "{{.RUSTFS_MCP_CMD}}"
+      - xplat rm -rf "{{.RUSTFS_DATA_DIR}}"
+      - cmd: echo "OK - Cleaned RustFS"
+
+  # ===========================================================================
+  # URLs
+  # ===========================================================================
+
+  url:github:
+    desc: Open RustFS GitHub repository
+    cmds:
+      - |
+        URL="https://github.com/{{.RUSTFS_GITHUB}}"
+        echo "Opening $URL"
+        {{if eq OS "darwin"}}open "$URL"{{else if eq OS "linux"}}xdg-open "$URL"{{else}}start "$URL"{{end}}
+
+  url:docs:
+    desc: Open RustFS documentation
+    cmds:
+      - |
+        URL="https://docs.rustfs.com"
+        echo "Opening $URL"
+        {{if eq OS "darwin"}}open "$URL"{{else if eq OS "linux"}}xdg-open "$URL"{{else}}start "$URL"{{end}}
+
+  url:mcp:
+    desc: Open RustFS MCP documentation
+    cmds:
+      - |
+        URL="https://docs.rustfs.com/developer/mcp.html"
+        echo "Opening $URL"
+        {{if eq OS "darwin"}}open "$URL"{{else if eq OS "linux"}}xdg-open "$URL"{{else}}start "$URL"{{end}}
+
+  # ===========================================================================
+  # Taskfile MCP Server
+  # ===========================================================================
+
+  taskfile-mcp:setup:
+    desc: Install mcp-taskfile-server (exposes tasks as MCP tools)
+    cmds:
+      - |
+        echo "Installing mcp-taskfile-server..."
+        go install github.com/rsclarke/mcp-taskfile-server@latest
+        echo ""
+        echo "OK: Installed mcp-taskfile-server"
+        echo ""
+        echo "Binary location:"
+        which mcp-taskfile-server || echo "  $(go env GOPATH)/bin/mcp-taskfile-server"
+
+  taskfile-mcp:config:
+    desc: Show MCP config for Taskfile server
+    cmds:
+      - |
+        echo "========================================"
+        echo "Taskfile MCP Server Configuration"
+        echo "========================================"
+        echo ""
+        echo "Add to your AI IDE settings (Claude Desktop, Cursor, etc.):"
+        echo ""
+        cat << EOF
+        {
+          "mcpServers": {
+            "taskfile": {
+              "command": "mcp-taskfile-server",
+              "cwd": "{{.ROOT_DIR}}",
+              "env": {
+                "TASK_X_REMOTE_TASKFILES": "1"
+              }
+            }
+          }
+        }
+        EOF
+        echo ""
+        echo "This exposes ALL your Taskfile tasks as MCP tools!"
+        echo "The AI can then run: setup, run, rustfs:setup, etc."
+        echo ""
+        echo "Note: TASK_X_REMOTE_TASKFILES=1 enables remote taskfile includes"
+        echo ""
+        echo "Source: https://github.com/rsclarke/mcp-taskfile-server"
+        echo ""
+
+  taskfile-mcp:test:
+    desc: Test mcp-taskfile-server locally
+    cmds:
+      - |
+        echo "Testing mcp-taskfile-server..."
+        export TASK_X_REMOTE_TASKFILES=1
+        mcp-taskfile-server
